@@ -26,6 +26,10 @@ namespace __asan {
 
 Flags asan_flags_dont_use_directly;  // use via flags().
 
+static const char *MaybeCallAsanDefaultOptions() {
+  return (&__asan_default_options) ? __asan_default_options() : "";
+}
+
 static const char *MaybeUseAsanDefaultOptionsCompileDefinition() {
 #ifdef ASAN_DEFAULT_OPTIONS
   return SANITIZER_STRINGIFY(ASAN_DEFAULT_OPTIONS);
@@ -104,14 +108,14 @@ void InitializeFlags() {
   asan_parser.ParseString(asan_compile_def);
 
   // Override from user-specified string.
-  const char *asan_default_options = __asan_default_options();
+  const char *asan_default_options = MaybeCallAsanDefaultOptions();
   asan_parser.ParseString(asan_default_options);
 #if CAN_SANITIZE_UB
-  const char *ubsan_default_options = __ubsan_default_options();
+  const char *ubsan_default_options = __ubsan::MaybeCallUbsanDefaultOptions();
   ubsan_parser.ParseString(ubsan_default_options);
 #endif
 #if CAN_SANITIZE_LEAKS
-  const char *lsan_default_options = __lsan_default_options();
+  const char *lsan_default_options = __lsan::MaybeCallLsanDefaultOptions();
   lsan_parser.ParseString(lsan_default_options);
 #endif
 
@@ -140,6 +144,11 @@ void InitializeFlags() {
            SanitizerToolName);
     Die();
   }
+
+  if (common_flags()->detect_leaks && common_flags()->address_watcher) {
+     address_watcher = 1;
+  }
+
   // Ensure that redzone is at least SHADOW_GRANULARITY.
   if (f->redzone < (int)SHADOW_GRANULARITY)
     f->redzone = SHADOW_GRANULARITY;

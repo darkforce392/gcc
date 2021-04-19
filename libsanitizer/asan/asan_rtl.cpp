@@ -27,6 +27,8 @@
 #include "sanitizer_common/sanitizer_flags.h"
 #include "sanitizer_common/sanitizer_libc.h"
 #include "sanitizer_common/sanitizer_symbolizer.h"
+#include "sanitizer_common/sanitizer_watchaddrfileio.h"
+#include "sanitizer_common/sanitizer_watchaddr.h"
 #include "lsan/lsan_common.h"
 #include "ubsan/ubsan_init.h"
 #include "ubsan/ubsan_platform.h"
@@ -45,8 +47,7 @@ static void AsanDie() {
     // Don't die twice - run a busy loop.
     while (1) { }
   }
-  if (common_flags()->print_module_map >= 1)
-    DumpProcessMap();
+  if (common_flags()->print_module_map >= 1) PrintModuleMap();
   if (flags()->sleep_before_dying) {
     Report("Sleeping for %d second(s)\n", flags()->sleep_before_dying);
     SleepForSeconds(flags()->sleep_before_dying);
@@ -98,8 +99,10 @@ static void OnLowLevelAllocate(uptr ptr, uptr size) {
 
 // -------------------------- Run-time entry ------------------- {{{1
 // exported functions
+
 #define ASAN_REPORT_ERROR(type, is_write, size)                     \
 extern "C" NOINLINE INTERFACE_ATTRIBUTE                             \
+void __asan_report_ ## type ## size(uptr addr) __attribute__ ((no_caller_saved_registers)); \
 void __asan_report_ ## type ## size(uptr addr) {                    \
   GET_CALLER_PC_BP_SP;                                              \
   ReportGenericError(pc, bp, sp, addr, is_write, size, 0, true);    \
@@ -320,7 +323,7 @@ static void InitializeHighMemEnd() {
   kHighMemEnd = GetMaxUserVirtualAddress();
   // Increase kHighMemEnd to make sure it's properly
   // aligned together with kHighMemBeg:
-  kHighMemEnd |= (GetMmapGranularity() << SHADOW_SCALE) - 1;
+  kHighMemEnd |= SHADOW_GRANULARITY * GetMmapGranularity() - 1;
 #endif  // !ASAN_FIXED_MAPPING
   CHECK_EQ((kHighMemBeg % GetMmapGranularity()), 0);
 #endif  // !SANITIZER_MYRIAD2
@@ -552,33 +555,22 @@ class AsanInitializer {
 static AsanInitializer asan_initializer;
 #endif  // ASAN_DYNAMIC
 
-void UnpoisonStack(uptr bottom, uptr top, const char *type) {
-  static const uptr kMaxExpectedCleanupSize = 64 << 20;  // 64M
-  if (top - bottom > kMaxExpectedCleanupSize) {
-    static bool reported_warning = false;
-    if (reported_warning)
-      return;
-    reported_warning = true;
-    Report(
-        "WARNING: ASan is ignoring requested __asan_handle_no_return: "
-        "stack type: %s top: %p; bottom %p; size: %p (%zd)\n"
-        "False positive error reports may follow\n"
-        "For details see "
-        "https://github.com/google/sanitizers/issues/189\n",
-        type, top, bottom, top - bottom, top - bottom);
+} // namespace __asan
+
+// ---------------------- Interface ---------------- {{{1
+using namespace __asan;
+
+void NOINLINE __asan_handle_no_return() {
+  if (asan_init_is_running)
     return;
-  }
-  PoisonShadow(bottom, top - bottom, 0);
-}
 
-static void UnpoisonDefaultStack() {
-  uptr bottom, top;
-
-  if (AsanThread *curr_thread = GetCurrentThread()) {
-    int local_stack;
-    const uptr page_size = GetPageSizeCached();
+  int local_stack;
+  AsanThread *curr_thread = GetCurrentThread();
+  uptr PageSize = GetPageSizeCached();
+  uptr top, bottom;
+  if (curr_thread) {
     top = curr_thread->stack_top();
-    bottom = ((uptr)&local_stack - page_size) & ~(page_size - 1);
+    bottom = ((uptr)&local_stack - PageSize) & ~(PageSize - 1);
   } else if (SANITIZER_RTEMS) {
     // Give up On RTEMS.
     return;
@@ -590,29 +582,23 @@ static void UnpoisonDefaultStack() {
                          &tls_size);
     top = bottom + stack_size;
   }
-
-  UnpoisonStack(bottom, top, "default");
-}
-
-static void UnpoisonFakeStack() {
-  AsanThread *curr_thread = GetCurrentThread();
+  static const uptr kMaxExpectedCleanupSize = 64 << 20;  // 64M
+  if (top - bottom > kMaxExpectedCleanupSize) {
+    static bool reported_warning = false;
+    if (reported_warning)
+      return;
+    reported_warning = true;
+    Report("WARNING: ASan is ignoring requested __asan_handle_no_return: "
+           "stack top: %p; bottom %p; size: %p (%zd)\n"
+           "False positive error reports may follow\n"
+           "For details see "
+           "https://github.com/google/sanitizers/issues/189\n",
+           top, bottom, top - bottom, top - bottom);
+    return;
+  }
+  PoisonShadow(bottom, top - bottom, 0);
   if (curr_thread && curr_thread->has_fake_stack())
     curr_thread->fake_stack()->HandleNoReturn();
-}
-
-}  // namespace __asan
-
-// ---------------------- Interface ---------------- {{{1
-using namespace __asan;
-
-void NOINLINE __asan_handle_no_return() {
-  if (asan_init_is_running)
-    return;
-
-  if (!PlatformUnpoisonStacks())
-    UnpoisonDefaultStack();
-
-  UnpoisonFakeStack();
 }
 
 extern "C" void *__asan_extra_spill_area() {
@@ -641,4 +627,13 @@ void __asan_init() {
 
 void __asan_version_mismatch_check() {
   // Do nothing.
+}
+
+void __asan_binary_date(uptr time) {
+
+    if (address_watcher)
+    {
+       CheckIfBinaryRecompiled(time); 
+       InitializeWatchlist();
+    } 
 }

@@ -36,6 +36,11 @@ extern "C" {
   // __asan_version_mismatch_check_vXXX at compile-time.
   SANITIZER_INTERFACE_ATTRIBUTE void __asan_version_mismatch_check();
 
+  // This function exists to get information on the time of compilation
+  // of the binary. AddressWatcher uses this information to update its
+  // tracklist of stacks to watch.
+  SANITIZER_INTERFACE_ATTRIBUTE void __asan_binary_date(uptr time);
+
   // This structure is used to describe the source location of a place where
   // global was defined.
   struct __asan_global_source_location {
@@ -173,8 +178,8 @@ extern "C" {
 
   SANITIZER_INTERFACE_ATTRIBUTE void __asan_print_accumulated_stats();
 
-  SANITIZER_INTERFACE_ATTRIBUTE
-  const char *__asan_default_options();
+  SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+  const char* __asan_default_options();
 
   SANITIZER_INTERFACE_ATTRIBUTE
   extern uptr __asan_shadow_memory_dynamic_address;

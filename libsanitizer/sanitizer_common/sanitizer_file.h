@@ -43,10 +43,14 @@ struct ReportFile {
   // the PID of child will be different from fd_pid.
   uptr fd_pid;
 
+  // Is this report an Address Watch Report?
+  bool IsWatchAddrReport;
+
  private:
   void ReopenIfNecessary();
 };
 extern ReportFile report_file;
+extern ReportFile watchaddr_file;
 
 enum FileAccessMode {
   RdOnly,

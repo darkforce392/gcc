@@ -79,6 +79,8 @@ sanitizer_common_files = \
 	sanitizer_tls_get_addr.cpp \
 	sanitizer_unwind_linux_libcdep.cpp \
 	sanitizer_unwind_win.cpp \
+	sanitizer_watchaddr.cpp \
+	sanitizer_watchaddrfileio.cpp \
 	sanitizer_win.cpp
 
 

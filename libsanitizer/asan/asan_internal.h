@@ -83,16 +83,6 @@ void *AsanDoesNotSupportStaticLinkage();
 void AsanCheckDynamicRTPrereqs();
 void AsanCheckIncompatibleRT();
 
-// Unpoisons platform-specific stacks.
-// Returns true if all stacks have been unpoisoned.
-bool PlatformUnpoisonStacks();
-
-// asan_rtl.cpp
-// Unpoison a region containing a stack.
-// Performs a sanity check and warns if the bounds don't look right.
-// The warning contains the type string to identify the stack type.
-void UnpoisonStack(uptr bottom, uptr top, const char *type);
-
 // asan_thread.cpp
 AsanThread *CreateMainThread();
 
@@ -117,6 +107,8 @@ void PlatformTSDDtor(void *tsd);
 void AppendToErrorMessageBuffer(const char *buffer);
 
 void *AsanDlSymNext(const char *sym);
+
+void ReserveShadowMemoryRange(uptr beg, uptr end, const char *name);
 
 // Returns `true` iff most of ASan init process should be skipped due to the
 // ASan library being loaded via `dlopen()`. Platforms may perform any
@@ -159,6 +151,12 @@ const int kAsanArrayCookieMagic = 0xac;
 const int kAsanIntraObjectRedzone = 0xbb;
 const int kAsanAllocaLeftMagic = 0xca;
 const int kAsanAllocaRightMagic = 0xcb;
+// Used to watch allocated memory location to identify last load/store
+// 0xb0 - 8 bytes are addrressable watch all these
+// 0xb1 - 1 byte is addressable and watch it
+// 0xb2 - 2 bytes are addressable and watch them
+// so on.. till 0xb7
+const int kAsanWatchMagic = 0xb0;
 // Used to populate the shadow gap for systems without memory
 // protection there (i.e. Myriad).
 const int kAsanShadowGap = 0xcc;

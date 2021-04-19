@@ -25,6 +25,7 @@
 #include "sanitizer_common/sanitizer_report_decorator.h"
 #include "sanitizer_common/sanitizer_stackdepot.h"
 #include "sanitizer_common/sanitizer_symbolizer.h"
+#include "sanitizer_common/sanitizer_watchaddr.h"
 
 namespace __asan {
 
@@ -151,8 +152,7 @@ class ScopedInErrorReport {
     if (common_flags()->print_cmdline)
       PrintCmdline();
 
-    if (common_flags()->print_module_map == 2)
-      DumpProcessMap();
+    if (common_flags()->print_module_map == 2) PrintModuleMap();
 
     // Copy the message buffer so that we could start logging without holding a
     // lock that gets aquired during printing.
@@ -412,7 +412,7 @@ static bool IsInvalidPointerPair(uptr a1, uptr a2) {
   return false;
 }
 
-static inline void CheckForInvalidPointerPair(void *p1, void *p2) {
+static INLINE void CheckForInvalidPointerPair(void *p1, void *p2) {
   switch (flags()->detect_invalid_pointer_pairs) {
     case 0:
       return;
@@ -457,8 +457,52 @@ static bool SuppressErrorReport(uptr pc) {
   Die();
 }
 
+bool CheckWatch(uptr addr,uptr access_size,uptr pc,uptr bp){
+    if (AddrIsInMem(addr)) {
+      // Do checks to verify that this chunk of memory for load/store contains watched memory.
+      u8 *shadow_addr = (u8 *)MemToShadow(addr);
+      if ((*shadow_addr & 0xf0) != 0xb0)
+      {
+         // If we are accessing 16 bytes, look at the second shadow byte.
+         if (access_size > SHADOW_GRANULARITY)
+         {
+             shadow_addr++;
+             if ((*shadow_addr & 0xf0) != 0xb0)
+                return false;
+         }
+         else
+             return false;
+      }
+
+      AsanChunkView chunk = FindHeapChunkByAddress(addr);
+      if (!chunk.IsValid()) {
+         return false;
+      }
+      u32 alloc_stack_id = chunk.GetAllocStackId();
+ 
+      GET_STACK_TRACE_FATAL(pc,bp);
+      stack.size--;
+      StackDepotPutLastUse(alloc_stack_id,&stack); 
+
+      // Is this an inproper memory access? Can be so even if it is watched memory.
+      // If it is improper access we don't return control flow to application execution.
+      int k = (*shadow_addr & 0x0f);
+      if (k != 0 && ((addr & 7) + access_size > k))
+          return false;
+
+      return true;
+     }
+
+    // This address is not in memory itself. Address Watcher has nothing to do with it.
+     return false;
+}
+
 void ReportGenericError(uptr pc, uptr bp, uptr sp, uptr addr, bool is_write,
                         uptr access_size, u32 exp, bool fatal) {
+
+  if (address_watcher && CheckWatch(addr, access_size, pc, bp))
+      return;
+ 
   if (!fatal && SuppressErrorReport(pc)) return;
   ENABLE_FRAME_POINTER;
 
